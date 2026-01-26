@@ -1,0 +1,11 @@
+{
+    "name":"ChatGPT Search Insights by Listable Labs",
+    "version":"1.0.0",
+    "description":"A ChatGPT extension that provides search insights for the current page.",
+    "manifest_version":3,
+    "action":{
+        "default_popup":"index.html"
+    },
+    "permissions":["scripting","tabs"],
+    "host_permissions":["https://*//*"]
+}

@@ -1,95 +1,85 @@
-const queriesBody = document.getElementById("queries-body");
-const urlsBody = document.getElementById("urls-body");
-const queriesCount = document.getElementById("queries-count");
-const urlsCount = document.getElementById("urls-count");
-const fetchButton = document.getElementById("fetch-queries");
-const statusEl = document.getElementById("status");
-
+// Function to render your tables (Your original logic)
 const renderTable = (items, tbody, countEl, emptyText) => {
-  if (!tbody || !countEl) return;
   countEl.textContent = String(items.length);
   tbody.innerHTML = "";
-
   if (!items.length) {
-    const row = document.createElement("tr");
-    const cell = document.createElement("td");
-    cell.colSpan = 2;
-    cell.className = "empty";
-    cell.textContent = emptyText;
-    row.appendChild(cell);
-    tbody.appendChild(row);
+    tbody.innerHTML = `<tr><td colspan="2" class="empty">${emptyText}</td></tr>`;
     return;
   }
-
-  const fragment = document.createDocumentFragment();
   items.forEach((item, index) => {
-    const row = document.createElement("tr");
-    const idxCell = document.createElement("td");
-    const valueCell = document.createElement("td");
-    idxCell.textContent = String(index + 1);
-    valueCell.textContent = item;
-    row.appendChild(idxCell);
-    row.appendChild(valueCell);
-    fragment.appendChild(row);
+    const row = `<tr><td>${index + 1}</td><td>${item}</td></tr>`;
+    tbody.insertAdjacentHTML('beforeend', row);
   });
-  tbody.appendChild(fragment);
 };
 
-const loadLatest = async () => {
-  try {
-    const response = await chrome.runtime.sendMessage({ type: "get_latest" });
-    const queries = Array.isArray(response?.queries) ? response.queries : [];
-    const urls = Array.isArray(response?.urls) ? response.urls : [];
+// UI Elements
+const qBody = document.getElementById("queries-body");
+const uBody = document.getElementById("urls-body");
+const qCount = document.getElementById("queries-count");
+const uCount = document.getElementById("urls-count");
+const dataSection = document.getElementById("data-section");
 
-    renderTable(queries, queriesBody, queriesCount, "No queries captured yet.");
-    renderTable(urls, urlsBody, urlsCount, "No URLs captured yet.");
-  } catch (error) {
-    renderTable([], queriesBody, queriesCount, "No queries captured yet.");
-    renderTable([], urlsBody, urlsCount, "No URLs captured yet.");
-  }
+const extractConversationIdFromUrl = (url) => {
+  if (!url) return null;
+  const match = url.match(/\/c\/([a-z0-9-]+)/i) || url.match(/\/chat\/([a-z0-9-]+)/i);
+  return match ? match[1] : null;
 };
 
-const setStatus = (text) => {
-  if (!statusEl) return;
-  statusEl.textContent = text;
-};
-
-const startCapture = async () => {
-  if (!fetchButton) return;
-  fetchButton.disabled = true;
-  setStatus("Capturing...");
-
-  try {
-    const response = await chrome.runtime.sendMessage({ type: "start_capture" });
-    if (!response?.ok) {
-      setStatus("Failed to attach debugger.");
-      fetchButton.disabled = false;
-      return;
-    }
-  } catch (error) {
-    setStatus("Failed to attach debugger.");
-    fetchButton.disabled = false;
-    return;
-  }
-
-  const startedAt = Date.now();
-  const poll = async () => {
-    await loadLatest();
-    const queries = Number(queriesCount?.textContent || 0);
-    const urls = Number(urlsCount?.textContent || 0);
-    if (queries > 0 || urls > 0 || Date.now() - startedAt > 8000) {
-      setStatus(queries || urls ? "Captured." : "No data yet.");
-      fetchButton.disabled = false;
-      return;
-    }
-    setTimeout(poll, 500);
-  };
-  poll();
-};
-
-document.addEventListener("DOMContentLoaded", () => {
-  loadLatest();
-  if (fetchButton) {
-    fetchButton.addEventListener("click", startCapture);
-  }
+// 1. Handle Click
+document.getElementById("fetch-btn").addEventListener("click", () => {
+  chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+    if (!tabs[0]) return;
+    
+    // We DON'T clear storage here anymore. 
+    // This stops the "vanishing" while the page is reloading.
+    chrome.tabs.reload(tabs[0].id);
+  });
 });
+
+
+
+// 2. Listen for Data updates from the content script
+chrome.storage.onChanged.addListener(() => {
+  updateUI();
+});
+
+// 3. Initial Load
+const updateUI = () => {
+  chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+    const tabUrl = tabs?.[0]?.url || "";
+    const conversationId = extractConversationIdFromUrl(tabUrl);
+
+    chrome.storage.local.get(
+      ["conversationData", "lastSeenConversationId"],
+      (data) => {
+        const conversationData = data.conversationData || {};
+        const hasConversation = Boolean(conversationId);
+        const isSwitch =
+          hasConversation && data.lastSeenConversationId !== conversationId;
+        const entry = hasConversation ? conversationData[conversationId] : null;
+        const latestQueries = isSwitch ? [] : entry?.queries || [];
+        const latestUrls = isSwitch ? [] : entry?.urls || [];
+        const hasData = latestQueries.length > 0 && latestUrls.length > 0;
+
+        if (dataSection) {
+          dataSection.classList.toggle("hidden", !hasData);
+        }
+
+        renderTable(latestQueries, qBody, qCount, "No queries captured.");
+        renderTable(latestUrls, uBody, uCount, "No URLs captured.");
+
+        if (isSwitch) {
+          chrome.storage.local.set({
+            conversationData: {
+              ...conversationData,
+              [conversationId]: { queries: [], urls: [] }
+            },
+            lastSeenConversationId: conversationId
+          });
+        }
+      }
+    );
+  });
+};
+
+updateUI();

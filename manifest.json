@@ -1,11 +1,21 @@
 {
-    "name":"ChatGPT Search Insights by Listable Labs",
-    "version":"1.0.0",
-    "description":"A ChatGPT extension that provides search insights for the current page.",
-    "manifest_version":3,
-    "action":{
-        "default_popup":"index.html"
+    "name": "ChatGPT Search Insights by Listable Labs",
+    "version": "1.0.0",
+    "description": "A ChatGPT extension that provides search insights for the current page.",
+    "manifest_version": 3,
+    "devtools_page": "devtools.html",
+
+    "action": {
+        "default_popup": "index.html",
+        "default_title": "ChatGPT Search Insights"
     },
-    "permissions":["scripting","tabs"],
-    "host_permissions":["https://*//*"]
-}
+  
+    "background": {
+        "service_worker": "background.js"
+    },
+
+    "permissions": ["webRequest", "debugger"],
+
+    "host_permissions": ["https://*/*"]
+  }
+  

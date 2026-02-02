@@ -18,6 +18,16 @@ const uBody = document.getElementById("urls-body");
 const qCount = document.getElementById("queries-count");
 const uCount = document.getElementById("urls-count");
 const dataSection = document.getElementById("data-section");
+const fetchBtn = document.getElementById("fetch-btn");
+const loadingSpinner = document.getElementById("loading-spinner");
+const btnText = document.getElementById("btn-text");
+
+// Loading state helpers
+const setLoading = (isLoading) => {
+  fetchBtn.disabled = isLoading;
+  loadingSpinner.classList.toggle("hidden", !isLoading);
+  btnText.textContent = isLoading ? "Fetching..." : "Refresh & Fetch Data";
+};
 
 const extractConversationIdFromUrl = (url) => {
   if (!url) return null;
@@ -26,9 +36,28 @@ const extractConversationIdFromUrl = (url) => {
 };
 
 // 1. Handle Click
-document.getElementById("fetch-btn").addEventListener("click", () => {
+let reloadingTabId = null;
+
+const onTabUpdated = (tabId, changeInfo) => {
+  if (tabId === reloadingTabId && changeInfo.status === "complete") {
+    // Tab finished loading, stop loading state and update UI
+    chrome.tabs.onUpdated.removeListener(onTabUpdated);
+    reloadingTabId = null;
+    setLoading(false);
+    updateUI();
+  }
+};
+
+fetchBtn.addEventListener("click", () => {
+  setLoading(true);
   chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-    if (!tabs[0]) return;
+    if (!tabs[0]) {
+      setLoading(false);
+      return;
+    }
+    
+    reloadingTabId = tabs[0].id;
+    chrome.tabs.onUpdated.addListener(onTabUpdated);
     
     // We DON'T clear storage here anymore. 
     // This stops the "vanishing" while the page is reloading.

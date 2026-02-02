@@ -7,8 +7,20 @@
 
     "action": {
         "default_popup": "index.html",
-        "default_title": "ChatGPT Search Insights"
+        "default_title": "ChatGPT Search Insights",
+        "default_icon": "258010212.png"
     },
+
+    "icons": {
+        "16": "258010212.png",
+        "48": "258010212.png",
+        "128": "258010212.png"
+    },
+
+    "web_accessible_resources": [{
+        "resources": ["258010212.png"],
+        "matches": ["https://chatgpt.com/*"]
+    }],
   
     "background": {
         "service_worker": "background.js"
@@ -28,6 +40,12 @@
       "js": ["inject-main.js"],
       "world": "MAIN",
       "run_at": "document_start"
+    },
+    {
+      "matches": ["https://chatgpt.com/*"],
+      "js": ["inject-ui-template.js", "inject-ui.js"],
+      "css": ["inject-ui.css"],
+      "run_at": "document_idle"
     }
   ]
   }

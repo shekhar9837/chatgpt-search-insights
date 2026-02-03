@@ -3,7 +3,6 @@ const targetPrefix = "https://chatgpt.com/backend-api/conversation";
 // Store captured access token from intercepted requests
 let cachedAccessToken = null;
 
-// --- YOUR EXISTING EXTRACTION LOGIC ---
 const extractConversationId = (url) => {
   if (!url) return null;
   const match = url.match(/\/backend-api\/conversation\/([a-z0-9-]+)/i);
@@ -12,12 +11,12 @@ const extractConversationId = (url) => {
 
 // Try to get access token from various sources
 const getAccessToken = async () => {
-  // 1. Use cached token if available
+  // Use cached token if available
   if (cachedAccessToken) {
     return cachedAccessToken; 
   }
 
-  // 2. Try to get from session API
+  // Try to get from session API
   try {
     const sessionResponse = await fetch('https://chatgpt.com/api/auth/session', {
       credentials: 'include'
@@ -42,7 +41,7 @@ const getDeviceId = () => {
   return match ? match[1] : null;
 };
 
-// Listen for Perplexity Refresh (inject-ui asks main world to fetch thread API)
+// Listen for Perplexity thread fetch request
 window.addEventListener('message', async (event) => {
   if (event.source !== window || event.data?.type !== 'CSI_PERPLEXITY_REFRESH') return;
   const pathname = window.location.pathname || '';
@@ -172,10 +171,6 @@ const collectUrlsFromResponse = (payload) => {
     }
   };
 
-  // Collect from safe_urls
-  // addUrls(payload?.safe_urls);
-  
-  // Check in mapping for content references and search results
   const mapping = payload?.mapping;
   if (mapping && typeof mapping === 'object') {
     for (const node of Object.values(mapping)) {
@@ -200,7 +195,6 @@ const collectUrlsFromResponse = (payload) => {
   return Array.from(results);
 };
 
-// --- Perplexity extraction (Pro Search + normal search) ---
 const PERPLEXITY_URL_MARKER = "perplexity.ai";
 const PERPLEXITY_THREAD_API = "/rest/thread/";
 
@@ -316,7 +310,6 @@ const isPerplexitySearchPayload = (obj) => {
 
 const { fetch: originalFetch } = window;
 window.fetch = async (...args) => {
-  // Try to capture access token from request headers
   const request = args[0];
   const options = args[1] || {};
   if (options.headers) {
@@ -325,7 +318,6 @@ window.fetch = async (...args) => {
       cachedAccessToken = authHeader.substring(7);
     }
   }
-  // Also check if Request object has headers
   if (request instanceof Request) {
     const authHeader = request.headers.get('Authorization');
     if (authHeader && authHeader.startsWith('Bearer ')) {
@@ -345,7 +337,6 @@ window.fetch = async (...args) => {
         const queries = collectQueries(parsed);
         const urls = collectUrlsFromResponse(parsed);
 
-        // FIX: Only send if we actually found data
         if (queries.length > 0 || urls.length > 0) {
           window.postMessage(
             { type: "EXTRACTED_DATA", conversationId, queries, urls },
@@ -353,7 +344,6 @@ window.fetch = async (...args) => {
           );
         }
       } catch (e) {
-        // Ignore streams or non-JSON
       }
     });
   }
@@ -374,7 +364,6 @@ window.fetch = async (...args) => {
           );
         }
       } catch (e) {
-        // Ignore streams or non-JSON
       }
     });
   }
@@ -401,7 +390,6 @@ window.WebSocket = function (...args) {
           );
         }
       } catch (e) {
-        // Not JSON or no Perplexity structure
       }
     });
   }

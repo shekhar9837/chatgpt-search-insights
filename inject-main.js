@@ -14,7 +14,7 @@ const extractConversationId = (url) => {
 const getAccessToken = async () => {
   // 1. Use cached token if available
   if (cachedAccessToken) {
-    return cachedAccessToken;
+    return cachedAccessToken; 
   }
 
   // 2. Try to get from session API
@@ -41,6 +41,41 @@ const getDeviceId = () => {
   const match = document.cookie.match(/oai-did=([^;]+)/);
   return match ? match[1] : null;
 };
+
+// Listen for Perplexity Refresh (inject-ui asks main world to fetch thread API)
+window.addEventListener('message', async (event) => {
+  if (event.source !== window || event.data?.type !== 'CSI_PERPLEXITY_REFRESH') return;
+  const pathname = window.location.pathname || '';
+  const threadMatch = pathname.match(/\/search\/([^/?]+)/);
+  const threadId = threadMatch ? threadMatch[1] : null;
+  if (!threadId) {
+    window.postMessage({ type: 'CSI_PERPLEXITY_REFRESH_DONE', error: 'No thread ID in URL' }, '*');
+    return;
+  }
+  const supportedBlockUseCases = [
+    'answer_modes', 'media_items', 'knowledge_cards', 'inline_entity_cards',
+    'place_widgets', 'finance_widgets', 'prediction_market_widgets', 'sports_widgets',
+    'flight_status_widgets', 'news_widgets', 'shopping_widgets', 'jobs_widgets',
+    'search_result_widgets', 'inline_images', 'inline_assets', 'placeholder_cards',
+    'diff_blocks', 'inline_knowledge_cards', 'entity_group_v2', 'refinement_filters',
+    'canvas_mode', 'maps_preview', 'answer_tabs', 'price_comparison_widgets',
+    'preserve_latex', 'generic_onboarding_widgets', 'in_context_suggestions'
+  ];
+  const blockParams = supportedBlockUseCases.map(c => `supported_block_use_cases=${encodeURIComponent(c)}`).join('&');
+  const threadUrl = `https://www.perplexity.ai/rest/thread/${threadId}?with_parent_info=true&with_schematized_response=true&version=2.18&source=default&limit=10&offset=0&from_first=true&${blockParams}`;
+  try {
+    const response = await fetch(threadUrl, { credentials: 'include' });
+    const text = await response.text();
+    const parsed = JSON.parse(text);
+    const insights = collectPerplexityInsights(parsed);
+    window.postMessage({ type: 'EXTRACTED_DATA', source: 'perplexity', threadId, insights }, '*');
+  } catch (e) {
+    console.error('[Search Insights] Perplexity thread fetch error:', e);
+    window.postMessage({ type: 'CSI_PERPLEXITY_REFRESH_DONE', error: String(e.message || e) }, '*');
+    return;
+  }
+  window.postMessage({ type: 'CSI_PERPLEXITY_REFRESH_DONE' }, '*');
+});
 
 // Listen for fetch requests from inject-ui.js
 window.addEventListener('message', async (event) => {
@@ -165,6 +200,119 @@ const collectUrlsFromResponse = (payload) => {
   return Array.from(results);
 };
 
+// --- Perplexity extraction (Pro Search + normal search) ---
+const PERPLEXITY_URL_MARKER = "perplexity.ai";
+const PERPLEXITY_THREAD_API = "/rest/thread/";
+
+const getEntriesFromPayload = (payload) => {
+  return payload?.entries ?? payload?.thread?.entries ?? payload?.data?.entries;
+};
+
+function collectUrlsFromObject(obj, out, depth) {
+  if (!obj || typeof obj !== "object" || (depth && depth > 8)) return;
+  const d = (depth || 0) + 1;
+  if (Array.isArray(obj)) {
+    for (const item of obj) {
+      const u = item?.url ?? item;
+      if (typeof u === "string" && u.startsWith("http") && !u.includes("perplexity.ai")) out.add(u);
+      else collectUrlsFromObject(item, out, d);
+    }
+    return;
+  }
+  if (typeof obj.url === "string" && obj.url.startsWith("http") && !obj.url.includes("perplexity.ai")) out.add(obj.url);
+  if (obj.web_results && Array.isArray(obj.web_results)) {
+    for (const r of obj.web_results) {
+      const u = r?.url;
+      if (typeof u === "string" && u.startsWith("http")) out.add(u);
+    }
+  }
+  for (const key of ["citations", "references", "sources", "content", "steps", "blocks"]) {
+    if (obj[key]) collectUrlsFromObject(obj[key], out, d);
+  }
+}
+
+const collectPerplexityInsights = (payload) => {
+  const rewrittenQueries = [];
+  const sourceUrls = new Set();
+  const relatedQueriesSet = new Set();
+  const grouped = [];
+  const entries = getEntriesFromPayload(payload);
+
+  if (Array.isArray(entries)) {
+    for (const entry of entries) {
+      const related = entry?.related_queries;
+      if (Array.isArray(related)) {
+        for (const q of related) {
+          if (typeof q === "string" && q.trim()) relatedQueriesSet.add(q);
+        }
+      }
+
+      const blocks = entry?.blocks;
+      if (!Array.isArray(blocks)) continue;
+
+      for (const block of blocks) {
+        if (block?.intended_usage === "pro_search_steps") {
+          const steps = block?.plan_block?.steps;
+          if (!Array.isArray(steps)) continue;
+          const stepQueries = [];
+          let stepUrls = [];
+          for (const step of steps) {
+            if (step?.step_type === "SEARCH_WEB") {
+              const queries = step?.search_web_content?.queries;
+              if (Array.isArray(queries)) {
+                for (const q of queries) {
+                  const queryStr = typeof q === "string" ? q : q?.query;
+                  if (typeof queryStr === "string" && queryStr.trim()) {
+                    stepQueries.push(queryStr);
+                    rewrittenQueries.push(queryStr);
+                  }
+                }
+              }
+            } else if (step?.step_type === "SEARCH_RESULTS") {
+              const webResults = step?.web_results_content?.web_results;
+              stepUrls = [];
+              if (Array.isArray(webResults)) {
+                for (const r of webResults) {
+                  const url = r?.url;
+                  if (typeof url === "string" && url.startsWith("http")) {
+                    stepUrls.push(url);
+                    sourceUrls.add(url);
+                  }
+                }
+              }
+              for (const q of stepQueries) {
+                grouped.push({ query: q, urls: [...stepUrls] });
+              }
+              stepQueries.length = 0;
+            }
+          }
+          for (const q of stepQueries) {
+            grouped.push({ query: q, urls: [] });
+          }
+        } else {
+          collectUrlsFromObject(block, sourceUrls);
+        }
+      }
+    }
+  }
+
+  collectUrlsFromObject(payload, sourceUrls);
+
+  return {
+    source: "perplexity",
+    rewrittenQueries: [...new Set(rewrittenQueries)],
+    sourceUrls: Array.from(sourceUrls),
+    relatedQueries: Array.from(relatedQueriesSet),
+    grouped
+  };
+};
+
+const isPerplexitySearchPayload = (obj) => {
+  if (!obj || typeof obj !== "object") return false;
+  if (Array.isArray(getEntriesFromPayload(obj))) return true;
+  const str = JSON.stringify(obj);
+  return str.includes("search_web_content") || str.includes("web_results");
+};
 
 const { fetch: originalFetch } = window;
 window.fetch = async (...args) => {
@@ -209,5 +357,54 @@ window.fetch = async (...args) => {
       }
     });
   }
+
+  if (url && url.includes(PERPLEXITY_URL_MARKER) && url.includes(PERPLEXITY_THREAD_API)) {
+    const threadMatch = url.match(/\/rest\/thread\/([^/?]+)/);
+    const threadId = threadMatch ? threadMatch[1] : null;
+    const clone = response.clone();
+    clone.text().then(text => {
+      try {
+        const parsed = JSON.parse(text);
+        if (!isPerplexitySearchPayload(parsed)) return;
+        const insights = collectPerplexityInsights(parsed);
+        if (threadId) {
+          window.postMessage(
+            { type: "EXTRACTED_DATA", source: "perplexity", threadId, insights },
+            "*"
+          );
+        }
+      } catch (e) {
+        // Ignore streams or non-JSON
+      }
+    });
+  }
   return response;
 };
+
+// Perplexity WebSocket interceptor (streaming)
+const OriginalWebSocket = window.WebSocket;
+window.WebSocket = function (...args) {
+  const ws = new OriginalWebSocket(...args);
+  const wsUrl = typeof args[0] === "string" ? args[0] : (args[0] && args[0].url);
+  if (wsUrl && wsUrl.includes(PERPLEXITY_URL_MARKER)) {
+    ws.addEventListener("message", (event) => {
+      try {
+        const data = event.data;
+        if (typeof data !== "string") return;
+        const parsed = JSON.parse(data);
+        if (!isPerplexitySearchPayload(parsed)) return;
+        const insights = collectPerplexityInsights(parsed);
+        if (insights.rewrittenQueries.length > 0 || insights.sourceUrls.length > 0 || insights.relatedQueries.length > 0 || insights.grouped.length > 0) {
+          window.postMessage(
+            { type: "EXTRACTED_DATA", source: "perplexity", insights },
+            "*"
+          );
+        }
+      } catch (e) {
+        // Not JSON or no Perplexity structure
+      }
+    });
+  }
+  return ws;
+};
+window.WebSocket.prototype = OriginalWebSocket.prototype;

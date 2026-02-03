@@ -48,6 +48,8 @@
     const queriesCount = document.getElementById('csi-queries-count');
     const urlsCount = document.getElementById('csi-urls-count');
 
+    const isPerplexity = window.location.href.includes('perplexity.ai');
+
     // Toggle panel
     floatingBtn.addEventListener('click', () => {
       panel.classList.toggle('csi-open');
@@ -117,10 +119,27 @@
       return null;
     };
 
-    // Update UI from storage
+    // Update UI from storage (same Queries/URLs tables for both ChatGPT and Perplexity)
     const updateUI = () => {
+      if (isPerplexity) {
+        const pathname = window.location.pathname || '';
+        const threadMatch = pathname.match(/\/search\/([^/?]+)/);
+        const currentThreadId = threadMatch ? threadMatch[1] : null;
+        chrome.storage.local.get(['latestInsights'], (data) => {
+          const perplexityByThread = data.latestInsights?.perplexity || {};
+          const insights = currentThreadId ? perplexityByThread[currentThreadId] : null;
+          const queries = Array.from(new Set([
+            ...(insights?.rewrittenQueries || []),
+            ...(insights?.relatedQueries || [])
+          ]));
+          const urls = insights?.sourceUrls || [];
+          renderTable(queries, queriesBody, queriesCount, 'No queries captured yet');
+          renderTable(urls, urlsBody, urlsCount, 'No URLs captured yet');
+        });
+        return;
+      }
+
       const conversationId = extractConversationIdFromUrl(window.location.href);
-      
       chrome.storage.local.get(['conversationData', 'lastSeenConversationId'], (data) => {
         const conversationData = data.conversationData || {};
         const hasConversation = Boolean(conversationId);
@@ -160,6 +179,7 @@
           btnText.textContent = 'Refresh & Fetch Data';
           fetchBtn.style.background = '';
         }, 2500);
+        chrome.runtime.sendMessage({ type: 'REFRESH_DONE' }).catch(function() {});
         return;
       }
 
@@ -183,14 +203,31 @@
         }, () => {
           setLoading(false);
           updateUI();
+          chrome.runtime.sendMessage({ type: 'REFRESH_DONE' }).catch(function() {});
         });
       });
     });
 
-    // Fetch button click - request data from main world
+    // Listen for Perplexity refresh done (main world fetches thread API and signals done)
+    window.addEventListener('message', (event) => {
+      if (event.source !== window || event.data?.type !== 'CSI_PERPLEXITY_REFRESH_DONE') return;
+      setLoading(false);
+      updateUI();
+      if (event.data?.error) {
+        btnText.textContent = 'Refresh failed';
+        setTimeout(() => { btnText.textContent = 'Refresh & Fetch Data'; }, 2000);
+      }
+    });
+
+    // Fetch button click - same "Refresh & Fetch Data": ChatGPT = API fetch, Perplexity = fetch thread API
     fetchBtn.addEventListener('click', () => {
+      if (isPerplexity) {
+        setLoading(true);
+        window.postMessage({ type: 'CSI_PERPLEXITY_REFRESH' }, '*');
+        return;
+      }
+
       const conversationId = extractConversationIdFromUrl(window.location.href);
-      
       if (!conversationId) {
         btnText.textContent = 'No conversation found';
         setTimeout(() => {
@@ -200,8 +237,6 @@
       }
 
       setLoading(true);
-      
-      // Send message to inject-main.js to fetch data
       window.postMessage({ type: 'CSI_FETCH_REQUEST', conversationId }, '*');
     });
 

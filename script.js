@@ -35,18 +35,19 @@ const extractConversationIdFromUrl = (url) => {
   return match ? match[1] : null;
 };
 
-// 1. Handle Click
-let reloadingTabId = null;
+const extractPerplexityThreadIdFromUrl = (url) => {
+  if (!url || !url.includes("perplexity.ai")) return null;
+  const match = url.match(/\/search\/([^/?]+)/);
+  return match ? match[1] : null;
+};
 
-const onTabUpdated = (tabId, changeInfo) => {
-  if (tabId === reloadingTabId && changeInfo.status === "complete") {
-    // Tab finished loading, stop loading state and update UI
-    chrome.tabs.onUpdated.removeListener(onTabUpdated);
-    reloadingTabId = null;
+// 1. Handle Click - ask the page to fetch data (no reload)
+chrome.runtime.onMessage.addListener((message) => {
+  if (message && message.type === "REFRESH_DONE") {
     setLoading(false);
     updateUI();
   }
-};
+});
 
 fetchBtn.addEventListener("click", () => {
   setLoading(true);
@@ -55,13 +56,24 @@ fetchBtn.addEventListener("click", () => {
       setLoading(false);
       return;
     }
-    
-    reloadingTabId = tabs[0].id;
-    chrome.tabs.onUpdated.addListener(onTabUpdated);
-    
-    // We DON'T clear storage here anymore. 
-    // This stops the "vanishing" while the page is reloading.
-    chrome.tabs.reload(tabs[0].id);
+    var tab = tabs[0];
+    var url = tab.url || "";
+    if (url.indexOf("chatgpt.com") === -1 && url.indexOf("perplexity.ai") === -1) {
+      setLoading(false);
+      updateUI();
+      return;
+    }
+    chrome.tabs.sendMessage(tab.id, { action: "TRIGGER_REFRESH" }, (response) => {
+      if (chrome.runtime.lastError) {
+        setLoading(false);
+        updateUI();
+        return;
+      }
+      if (response && (response.done || response.error)) {
+        setLoading(false);
+        updateUI();
+      }
+    });
   });
 });
 
@@ -77,35 +89,51 @@ const updateUI = () => {
   chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
     const tabUrl = tabs?.[0]?.url || "";
     const conversationId = extractConversationIdFromUrl(tabUrl);
+    const isPerplexityTab = tabUrl.includes("perplexity.ai");
 
     chrome.storage.local.get(
-      ["conversationData", "lastSeenConversationId"],
+      ["conversationData", "lastSeenConversationId", "latestInsights"],
       (data) => {
         const conversationData = data.conversationData || {};
-        const hasConversation = Boolean(conversationId);
-        const isSwitch =
-          hasConversation && data.lastSeenConversationId !== conversationId;
-        const entry = hasConversation ? conversationData[conversationId] : null;
-        const latestQueries = isSwitch ? [] : entry?.queries || [];
-        const latestUrls = isSwitch ? [] : entry?.urls || [];
-        const hasData = latestQueries.length > 0 && latestUrls.length > 0;
+        const perplexityByThread = data.latestInsights?.perplexity || {};
+        const perplexityThreadId = extractPerplexityThreadIdFromUrl(tabUrl);
+        const perplexityInsights = perplexityThreadId ? perplexityByThread[perplexityThreadId] : null;
+        let latestQueries, latestUrls, showData;
+
+        if (isPerplexityTab) {
+          latestQueries = Array.from(
+            new Set([
+              ...(perplexityInsights?.rewrittenQueries || []),
+              ...(perplexityInsights?.relatedQueries || [])
+            ])
+          );
+          latestUrls = perplexityInsights?.sourceUrls || [];
+          showData = latestQueries.length > 0 || latestUrls.length > 0;
+        } else {
+          const hasConversation = Boolean(conversationId);
+          const isSwitch =
+            hasConversation && data.lastSeenConversationId !== conversationId;
+          const entry = hasConversation ? conversationData[conversationId] : null;
+          latestQueries = isSwitch ? [] : entry?.queries || [];
+          latestUrls = isSwitch ? [] : entry?.urls || [];
+          showData = latestQueries.length > 0 || latestUrls.length > 0;
+
+          if (isSwitch) {
+            chrome.storage.local.set({
+              conversationData: {
+                ...conversationData,
+                [conversationId]: { queries: [], urls: [] }
+              },
+              lastSeenConversationId: conversationId
+            });
+          }
+        }
 
         if (dataSection) {
-          dataSection.classList.toggle("hidden", !hasData);
+          dataSection.classList.toggle("hidden", !showData);
         }
-
         renderTable(latestQueries, qBody, qCount, "No queries captured.");
         renderTable(latestUrls, uBody, uCount, "No URLs captured.");
-
-        if (isSwitch) {
-          chrome.storage.local.set({
-            conversationData: {
-              ...conversationData,
-              [conversationId]: { queries: [], urls: [] }
-            },
-            lastSeenConversationId: conversationId
-          });
-        }
       }
     );
   });

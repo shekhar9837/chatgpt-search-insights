@@ -1,4 +1,4 @@
-// ChatGPT Search Insights - Floating UI Button
+// ChatGPT Analyse Search - Floating UI Button
 // Injects a floating button and panel into the ChatGPT UI
 
 (function() {
@@ -26,7 +26,7 @@
     // Create floating button
     const floatingBtn = document.createElement('button');
     floatingBtn.id = 'csi-floating-btn';
-    const iconUrl = chrome.runtime.getURL('258010212.png');
+    const iconUrl = chrome.runtime.getURL('icon.png');
     floatingBtn.innerHTML = CSI_TEMPLATES.floatingButton.replace('{{ICON_URL}}', iconUrl);
     document.body.appendChild(floatingBtn);
     console.log('[Search Insights] Floating button injected:', floatingBtn);
@@ -43,6 +43,7 @@
     const fetchBtn = document.getElementById('csi-fetch-btn');
     const spinner = document.getElementById('csi-spinner');
     const btnText = document.getElementById('csi-btn-text');
+    const btnArrow = document.getElementById('csi-btn-arrow');
     const queriesBody = document.getElementById('csi-queries-body');
     const urlsBody = document.getElementById('csi-urls-body');
     const queriesCount = document.getElementById('csi-queries-count');
@@ -73,11 +74,23 @@
       }
     });
 
+    const DEFAULT_BTN_LABEL = 'Fetch Queries';
+    const SUCCESS_BTN_LABEL = 'Rank your brand #1 in LLM search';
+
     // Loading state
     const setLoading = (isLoading) => {
       fetchBtn.disabled = isLoading;
       spinner.classList.toggle('csi-hidden', !isLoading);
-      btnText.textContent = isLoading ? 'Fetching...' : 'Refresh & Fetch Data';
+      btnText.textContent = isLoading ? 'Fetching...' : DEFAULT_BTN_LABEL;
+      if (btnArrow) btnArrow.classList.add('csi-hidden');
+    };
+
+    const setIdleLabel = (hasData) => {
+      const showSuccess = Boolean(hasData);
+      btnText.textContent = showSuccess ? SUCCESS_BTN_LABEL : DEFAULT_BTN_LABEL;
+      if (btnArrow) {
+        btnArrow.classList.toggle('csi-hidden', !showSuccess);
+      }
     };
 
     // Render table helper
@@ -135,6 +148,7 @@
           const urls = insights?.sourceUrls || [];
           renderTable(queries, queriesBody, queriesCount, 'No queries captured yet');
           renderTable(urls, urlsBody, urlsCount, 'No URLs captured yet');
+          setIdleLabel(queries.length > 0 || urls.length > 0);
         });
         return;
       }
@@ -150,6 +164,7 @@
 
         renderTable(latestQueries, queriesBody, queriesCount, 'No queries captured yet');
         renderTable(latestUrls, urlsBody, urlsCount, 'No URLs captured yet');
+        setIdleLabel(latestQueries.length > 0 || latestUrls.length > 0);
 
         if (isSwitch) {
           chrome.storage.local.set({
@@ -175,8 +190,9 @@
         setLoading(false);
         btnText.textContent = 'Error! Try again';
         fetchBtn.style.background = '#dc3545';
+        if (btnArrow) btnArrow.classList.add('csi-hidden');
         setTimeout(() => {
-          btnText.textContent = 'Refresh & Fetch Data';
+          btnText.textContent = DEFAULT_BTN_LABEL;
           fetchBtn.style.background = '';
         }, 2500);
         chrome.runtime.sendMessage({ type: 'REFRESH_DONE' }).catch(function() {});
@@ -202,6 +218,7 @@
           lastSeenConversationId: conversationId
         }, () => {
           setLoading(false);
+          setIdleLabel(updatedQueries.length > 0 || updatedUrls.length > 0);
           updateUI();
           chrome.runtime.sendMessage({ type: 'REFRESH_DONE' }).catch(function() {});
         });
@@ -215,12 +232,18 @@
       updateUI();
       if (event.data?.error) {
         btnText.textContent = 'Refresh failed';
-        setTimeout(() => { btnText.textContent = 'Refresh & Fetch Data'; }, 2000);
+        if (btnArrow) btnArrow.classList.add('csi-hidden');
+        setTimeout(() => { btnText.textContent = DEFAULT_BTN_LABEL; }, 2000);
       }
     });
 
-    // Fetch button click - same "Refresh & Fetch Data": ChatGPT = API fetch, Perplexity = fetch thread API
+    // Once the button shows the success label, clicking it redirects to Listable Labs.
     fetchBtn.addEventListener('click', () => {
+      if (btnText.textContent === SUCCESS_BTN_LABEL) {
+        window.open('https://listablelabs.com', '_blank');
+        return;
+      }
+
       if (isPerplexity) {
         setLoading(true);
         window.postMessage({ type: 'CSI_PERPLEXITY_REFRESH' }, '*');
@@ -230,8 +253,9 @@
       const conversationId = extractConversationIdFromUrl(window.location.href);
       if (!conversationId) {
         btnText.textContent = 'No conversation found';
+        if (btnArrow) btnArrow.classList.add('csi-hidden');
         setTimeout(() => {
-          btnText.textContent = 'Refresh & Fetch Data';
+          btnText.textContent = DEFAULT_BTN_LABEL;
         }, 2000);
         return;
       }

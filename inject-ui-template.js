@@ -1,16 +1,16 @@
-// ChatGPT Search Insights - UI Templates
+//  Analyse Search - UI Templates
 
 const CSI_TEMPLATES = {
   floatingButton: `
-    <img src="{{ICON_URL}}" alt="Search Insights" class="csi-btn-icon" />
-    Search Insights
+    <img src="{{ICON_URL}}" alt="Analyse Search" class="csi-btn-icon" />
+    Analyse Search
   `,
 
   panel: `
     <div class="csi-panel-header">
       <div class="csi-panel-title">
-        <h3>Search Insights</h3>
-        <span>for ChatGPT conversations</span>
+        <h3>Analyse Search</h3>
+        <span>for LLM conversations</span>
       </div>
       <button class="csi-close-btn" id="csi-close-btn">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -21,7 +21,12 @@ const CSI_TEMPLATES = {
     <div class="csi-panel-body">
       <button class="csi-fetch-btn" id="csi-fetch-btn">
         <span class="csi-spinner csi-hidden" id="csi-spinner"></span>
-        <span id="csi-btn-text">Refresh & Fetch Data</span>
+        <span id="csi-btn-text">Fetch Queries</span>
+        <span id="csi-btn-arrow" class="csi-btn-arrow csi-hidden" aria-hidden="true">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M5 12h14M13 5l7 7-7 7"/>
+          </svg>
+        </span>
       </button>
 
       <div class="csi-section">

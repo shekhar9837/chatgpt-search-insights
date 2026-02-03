@@ -1,24 +1,18 @@
 {
-    "name": "ChatGPT Search Insights by Listable Labs",
+    "name": "ChatGPT Analyse Search by Listable Labs",
     "version": "1.0.0",
-    "description": "A ChatGPT extension that provides search insights for the current page.",
+    "description": "A ChatGPT extension that provides analyse search for the current page.",
     "manifest_version": 3,
     "devtools_page": "devtools.html",
 
-    "action": {
-        "default_popup": "index.html",
-        "default_title": "ChatGPT Search Insights",
-        "default_icon": "258010212.png"
-    },
-
     "icons": {
-        "16": "258010212.png",
-        "48": "258010212.png",
-        "128": "258010212.png"
+        "16": "icon.png",
+        "48": "icon.png",
+        "128": "icon.png"
     },
 
     "web_accessible_resources": [{
-        "resources": ["258010212.png"],
+        "resources": ["icon.png"],
         "matches": ["https://chatgpt.com/*", "https://www.perplexity.ai/*", "https://perplexity.ai/*"]
     }],
   
